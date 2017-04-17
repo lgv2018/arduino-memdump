@@ -63,32 +63,68 @@ class ArduinoProfile:
                         dumpable.append(mt)
                     N += 1
                 except subprocess.CalledProcessError:
-                    break
+                    # not sure whether fuse0 exists or if the integers start
+                    # at fuse1, so always check both fuse0 and fuse1
+                    if N >= 1:
+                        break
+                    else:
+                        N += 1
+                        continue
 
         # return list of supported memtypes
         return dumpable
+
+def dump(args):
+    # save the working directory
+    pwd = os.getcwd()
+
+    a = ArduinoProfile(
+        mcu='m328p',
+        memtypes=['eeprom', 'efuse'],
+        port=args.port,
+        programmer='arduino'
+    )
+    print('Checking for supported memtypes...')
+    mts = a.find_memtypes()
+
+    # change back to the previous working directory before dumping the memory
+    os.chdir(pwd)
+
+    for mt in mts:
+        print('dumping {0}...'.format(mt))
+        # dump that memtype to a file
+        subprocess.run(
+            ['avrdude', '-p', a.mcu, '-c', a.programmer, '-P', a.port, 'U', \
+                '{0}:r:{0}.bin:r'.format(mt) \
+            ],
+            shell=True,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.STDOUT
+        )
 
 def main():
     # create top level parser
     parser = argparse.ArgumentParser()
     subparsers = parser.add_subparsers()
 
-    # option: strings
-    parser_strings = subparsers.add_parser('strings', help='find ASCII strings')
+    # global arguments
 
-    # option: dump
+    # mode: dump
+    parser_dump = subparsers.add_parser('dump', help='dumps the mcu\'s memory to files based on memory type')
+    # run the dump function
+    parser_dump.set_defaults(function=dump)
+
+    # port that the arduino is connected to via USB
+    parser_dump.add_argument('-p', '--port',
+            help='the port the Arduino is connected to, e.g. /dev/ttyUSB0',
+            required=True)
+
+    # mode: analyze
 
     args = parser.parse_args()
+    # run the function associated with the mode
+    args.function(args)
 
 if __name__ == '__main__':
-    # main()
-    a = ArduinoProfile(
-            mcu='m328p',
-            memtypes=['eeprom', 'efuse'],
-            port='/dev/ttyUSB0',
-            programmer='arduino'
-    )
-    mts = a.find_memtypes()
-    for mt in mts:
-        print('{0} is supported'.format(mt))
+    main()
 
