@@ -94,10 +94,8 @@ def dump(args):
         print('dumping {0}...'.format(mt))
         # dump that memtype to a file
         subprocess.run(
-            ['avrdude', '-p', a.mcu, '-c', a.programmer, '-P', a.port, 'U', \
-                '{0}:r:{0}.bin:r'.format(mt) \
-            ],
-            shell=True,
+            ['avrdude', '-p', a.mcu, '-c', a.programmer, '-P', a.port, '-U', '{0}:r:{0}.bin:r'.format(mt)],
+            shell=False,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.STDOUT
         )
