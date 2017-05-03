@@ -11,16 +11,15 @@ import subprocess
 import sys
 import tempfile
 
-# list of possible memory types supported by avrdude
-memtypes = ['eeprom', 'efuse', 'flash', 'fuse', 'hfuse', 'lfuse', 'lock',
-        'signature', 'application', 'apptable', 'boot', 'prodsig', 'usersig']
-
 class ArduinoProfile:
     def __init__(self, mcu, port, programmer):
         # name of the microcontroller e.g. Arduino Uno would use "m328p"
         self.mcu = mcu
         # name of the memory types that are supported
-        self.memtypes = memtypes
+        self.memtypes = ['eeprom', 'efuse', 'flash', 'fuse', 'hfuse', 'lfuse',
+        'lock', 'signature', 'application', 'apptable', 'boot', 'prodsig',
+        'usersig', 'fuse0', 'fuse1', 'fuse2', 'fuse3', 'fuse4', 'fuse5',
+        'fuse6', 'fuse7']
         # the port that the arduino is connected to, e.g. /dev/ttyUSB0
         self.port = port
         # the programmer used to program the arduino, e.g. arduino, stk500v2
@@ -36,51 +35,20 @@ def dump(args, profile):
 
     for mt in profile.memtypes:
         # dump that memtype to a file
-        try:
-            subprocess.run(
-                ['avrdude', '-p', profile.mcu, '-c', profile.programmer, '-P', profile.port, '-U', '{0}:r:{0}.bin:r'.format(mt)],
-                shell=False,
-                check=True,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.STDOUT
-            )
-        except subprocess.CalledProcessError:
-            profile.memtypes.remove(mt)
-
-    # also run avrdude for fuseN memtypes, i.e. 'fuse' followed by
-    # an integer, but stop once one is found to not be supported
-    N = 0
-    while True:
-        try:
-            mt = 'fuse{0}'.format(N)
-            ret = subprocess.run(
-                ['avrdude', '-p', profile.mcu, '-c', profile.programmer, \
-                    '-P', profile.port, '-U', \
-                    '{0}:r:{0}.bin:r'.format(mt) \
-                ],
-                check=True,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.STDOUT
-            )
-
-            # if no errors, add the memtype to the list of dumpables
-            if ret.check_returncode() == 0:
-                profile.memtypes.append(mt)
-            N += 1
-        except subprocess.CalledProcessError:
-            # not sure whether fuse0 exists or if the integers start
-            # at fuse1, so always check both fuse0 and fuse1
-            if N >= 1:
-                break
-            else:
-                N += 1
-                continue
+        subprocess.run(
+            ['avrdude', '-p', profile.mcu, '-c', profile.programmer, '-P', profile.port, '-U', '{0}:r:{0}.bin:r'.format(mt)],
+            shell=False,
+            check=False,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.STDOUT
+        )
 
 def analyze(args, profile):
     dump(args, profile)
 
     # read the .bin files that were dumped in the current directory
     mems = dict()
+    to_remove = []
     for mt in profile.memtypes:
         fname = mt + '.bin'
         try:
@@ -89,12 +57,14 @@ def analyze(args, profile):
             f.flush()
             f.close()
         except OSError as e:
-            # sometimes the avrdude subprocess doesn't raise a
-            # CalledProcessError even when the memtype doesn't exist, so
-            # remove it if no file was created for that memtype
-            profile.memtypes.remove(mt)
+            # remove mt if no file was created for that memtype
+            to_remove.append(mt)
 
-    # show successfully dumped memtypes
+    # remove memtypes that have no file associated with them
+    for t in to_remove:
+        profile.memtypes.remove(t)
+
+     # show successfully dumped memtypes
     mts = ''
     for mt in profile.memtypes:
         mts += mt + ', '
@@ -110,15 +80,24 @@ def analyze(args, profile):
             ['avr-objdump', '-b', 'binary', '-m', 'avr', '-D', 'flash.bin'])
         f = open(args.asm, 'wb')
         f.write(out)
+        print('Wrote assembly to {0}'.format(os.getcwd() + '/' + args.asm))
     else:
         print('Error! avr-objdump not found on your system!')
 
     # device signature
     if 'signature' in mems.keys():
-        hex_sig = binascii.hexlify(mems['signature'])
+        hex_sig = '0x' + binascii.hexlify(mems['signature']).decode('ascii')
         print('Device signature: {0}'.format(hex_sig))
 
-    # analyze fuses
+    # print fuses
+    if 'lfuse' in mems.keys():
+    	lfuse_hex = '0x' + binascii.hexlify(mems['lfuse']).decode('ascii')
+    	lfuse_bin = bin(int(lfuse_hex, 16))
+    	print('fuse low byte: {0} ({1})'.format(lfuse_hex, lfuse_bin))
+    if 'efuse' in mems.keys():
+    	efuse_hex = '0x' + binascii.hexlify(mems['efuse']).decode('ascii')
+    	efuse_bin = bin(int(efuse_hex, 16))
+    	print('fuse extended byte: {0} ({1})'.format(efuse_hex, efuse_bin))
 
 def main():
     # create top level parser
@@ -137,7 +116,7 @@ def main():
     parser.add_argument('-d', '--dir', default='./',
             help='the directory to dump the memory into (must exist); defaults to the current working directory')
     # dump the code to this file
-    parser.add_argument('--asm', default='./disas.s',
+    parser.add_argument('--asm', default='disas.s',
             help='the file to dump the disassembled flash memory to')
 
     # parse arguments
